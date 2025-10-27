@@ -1,4 +1,3 @@
-#Working solution with all the changes 
 import pandas as pd
 import numpy as np
 import datetime as dt
@@ -74,25 +73,29 @@ def is_pallet(shiptype: str) -> bool:
     return "PAL" in str(shiptype).upper()
 
 def read_workbook(path_or_bytes) -> Dict[str, pd.DataFrame]:
-    xls = pd.ExcelFile(path_or_bytes)
-    need = [
-        "Customer Master", "Service Rate Card", "Storage Type Master",
-        "Storage Charges", "Inbound Handling", "Inbound Rep & Shrink Wrap",
-        "Outbound Handling", "Outbound Rep", "Outbound Shrink & Pal Count",
-        "Return Handling", "Scrap Handling",
-        "Storage Summary", "Activity Summary", "Charge Summary"
-    ]
-    dfs = {}
-    for sh in need:
-        if sh in xls.sheet_names:
-            df = xls.parse(sh, header=0, dtype=object, keep_default_na=False)
-            df.columns = [str(c).strip() for c in df.columns]
-            dfs[sh] = df
-            dbg("SHEET_OK", name=sh, rows=len(df), cols=len(df.columns))
-        else:
-            dfs[sh] = pd.DataFrame()
-            dbg("SHEET_MISSING", name=sh)
-    return dfs
+    try:
+        xls = pd.ExcelFile(path_or_bytes)
+        need = [
+            "Customer Master", "Service Rate Card", "Storage Type Master",
+            "Storage Charges", "Inbound Handling", "Inbound Rep & Shrink Wrap",
+            "Outbound Handling", "Outbound Rep", "Outbound Shrink & Pal Count",
+            "Return Handling", "Scrap Handling",
+            "Storage Summary", "Activity Summary", "Charge Summary"
+        ]
+        dfs = {}
+        for sh in need:
+            if sh in xls.sheet_names:
+                df = xls.parse(sh, header=0, dtype=object, keep_default_na=False)
+                df.columns = [str(c).strip() for c in df.columns]
+                dfs[sh] = df
+                dbg("SHEET_OK", name=sh, rows=len(df), cols=len(df.columns))
+            else:
+                dfs[sh] = pd.DataFrame()
+                dbg("SHEET_MISSING", name=sh)
+        return dfs
+    except Exception as e:
+        print(f"Error reading workbook: {e}")
+        raise
 
 def build_rate_map(rate_df: pd.DataFrame, cust: str, service: str) -> Dict[str, float]:
     if rate_df.empty:
@@ -141,7 +144,6 @@ def generate_storage_summary(dfs: Dict[str, pd.DataFrame], cust: str, d_start: d
     if ws.empty:
         dbg("STORAGE_NO_SOURCE")
         return pd.DataFrame(columns=["Brand","Ambient","Charge_Ambient","Dry","Charge_Dry","Chiller","Charge_Chiller","Freezer","Charge_Freezer"])
-
     cols = ws.columns
     def ci(i): return cols[i-1] if (i-1) < len(cols) else None
     COL_OWNER = ci(1)
@@ -155,14 +157,12 @@ def generate_storage_summary(dfs: Dict[str, pd.DataFrame], cust: str, d_start: d
     if any(v is None for v in needed):
         dbg("STORAGE_MISSING_COLS", cols=needed)
         return pd.DataFrame(columns=["Brand","Ambient","Charge_Ambient","Dry","Charge_Dry","Chiller","Charge_Chiller","Freezer","Charge_Freezer"])
-
     rmap_u = build_rate_map_with_units(rc, cust, "STORAGE")
     if not rmap_u:
         dbg("STORAGE_NO_RATES", cust=cust)
     vol_or_hu = {}
     seen_hu = set()
     all_brand_cond = set()
-
     for i, r in ws.iterrows():
         try:
             own = str(nz(r.get(COL_OWNER, ""))).upper().strip()
@@ -181,14 +181,12 @@ def generate_storage_summary(dfs: Dict[str, pd.DataFrame], cust: str, d_start: d
             hu = str(nz(r.get(COL_HU, ""))).strip() or f"BIN_{binv}"
             key = f"{brand}|{cond}"
             all_brand_cond.add(key)
-
             rate_unit = rmap_u.get(cond)
             if rate_unit is None:
                 for ck, rv in rmap_u.items():
                     if cond in ck:
                         rate_unit = rv
                         break
-
             unit = rate_unit[1] if rate_unit else ""
             if unit == "M3":
                 vol_or_hu[key] = vol_or_hu.get(key, 0.0) + vol
@@ -199,7 +197,6 @@ def generate_storage_summary(dfs: Dict[str, pd.DataFrame], cust: str, d_start: d
                     vol_or_hu[key] = vol_or_hu.get(key, 0.0) + 1.0
         except Exception as e:
             dbg("STO_ROW_ERR", row=i+2, err=str(e))
-
     brand_map = {}
     for key in all_brand_cond:
         qty = vol_or_hu.get(key, 0.0)
@@ -216,7 +213,6 @@ def generate_storage_summary(dfs: Dict[str, pd.DataFrame], cust: str, d_start: d
                     break
         amt = round(qty * rate, 2)
         brand_map[brand][cond] = {"v": qty, "c": amt}
-
     rows_out = []
     gt = {"Ambient_v":0,"Ambient_c":0,"Dry_v":0,"Dry_c":0,"Chiller_v":0,"Chiller_c":0,"Freezer_v":0,"Freezer_c":0}
     for brand, conds in brand_map.items():
@@ -234,7 +230,6 @@ def generate_storage_summary(dfs: Dict[str, pd.DataFrame], cust: str, d_start: d
                 elif cond == "FREEZER":
                     gt["Freezer_v"] += q; gt["Freezer_c"] += a
         rows_out.append(rec)
-
     df = pd.DataFrame(rows_out)
     if df.empty:
         df = pd.DataFrame(columns=["Brand","Ambient","Charge_Ambient","Dry","Charge_Dry","Chiller","Charge_Chiller","Freezer","Charge_Freezer"])
@@ -258,16 +253,13 @@ def generate_activity_inbound(dfs, cust, d_start, d_end):
     if ws.empty and rs.empty:
         dbg("INB_NO_SOURCE")
         return pd.DataFrame(columns=out_cols), pd.DataFrame(columns=["Phase","Row","Where","Error/Note","Value"])
-
     cols = ws.columns
     def ci(i): return cols[i-1] if (i-1) < len(cols) else None
     OWN = ci(1); DT = ci(2); SHP = ci(4); BR = ci(5); DOC = ci(8); HU = ci(15)
-
     rmap = build_rate_map(rc, cust, "INBOUND HANDLING")
     looseR = find_rate(rmap, ["LOOSE"])
     palletR = find_rate(rmap, ["PALLET"," PAL"])
     repR = find_rate(rmap, ["REP","SHRINK"])
-
     d_loose = {}; d_pal = {}; rep_map = {}; brands=set(); seen=set(); doc2brand={}
     if not ws.empty:
         for i, r in ws.iterrows():
@@ -295,7 +287,6 @@ def generate_activity_inbound(dfs, cust, d_start, d_end):
                 d_pal[brand] = d_pal.get(brand, 0) + 1
             else:
                 d_loose[brand] = d_loose.get(brand, 0) + 1
-
     if not rs.empty:
         cols2 = rs.columns
         def c2(i): return cols2[i-1] if (i-1) < len(cols2) else None
@@ -313,7 +304,6 @@ def generate_activity_inbound(dfs, cust, d_start, d_end):
             b2 = doc2brand.get(doc, "(blank)")
             rep_map[b2] = rep_map.get(b2, 0) + cnt
             brands.add(b2)
-
     rows=[]
     for b in sorted(brands):
         loo = int(d_loose.get(b, 0))
@@ -323,7 +313,6 @@ def generate_activity_inbound(dfs, cust, d_start, d_end):
         aP = round(pal * palletR, 2)
         aR = round(rep * repR, 2)
         rows.append({"Brand": b, "InLoose": loo, "Charge_Loose": aL, "InPallet": pal, "Charge_Pallet": aP, "InRepShr": rep, "Charge_RepShr": aR, "RowTotal": round(aL + aP + aR, 2)})
-
     df = pd.DataFrame(rows)
     if df.empty: df = pd.DataFrame(columns=out_cols)
     gt = {
@@ -352,13 +341,11 @@ def generate_activity_outbound(dfs, cust, d_start, d_end):
     cols = ws.columns
     def ci(i): return cols[i-1] if (i-1) < len(cols) else None
     OWN=ci(1); DT=ci(2); BR=ci(4); EACH=ci(9); PACK=ci(11); CART=ci(13); PAL=ci(15)
-
     rmap = build_rate_map(rc, cust, "OUTBOUND HANDLING")
     eachR = find_rate(rmap, ["EACH"])
     packR = find_rate(rmap, ["PACK"])
     cartR = find_rate(rmap, ["CARTON","CAR","BDL"])
-    palR  = find_rate(rmap, ["PALLET","PAL"])
-
+    palR = find_rate(rmap, ["PALLET","PAL"])
     d_each={}; d_pack={}; d_cart={}; d_pal={}; brands=set()
     for i, r in ws.iterrows():
         owner = str(nz(r.get(OWN, ""))).upper().strip()
@@ -374,7 +361,6 @@ def generate_activity_outbound(dfs, cust, d_start, d_end):
             q = float(pd.to_numeric(nz(r.get(col, 0)), errors="coerce") or 0.0)
             if q != 0: dct[b] = dct.get(b, 0.0) + q
         add(d_each, EACH); add(d_pack, PACK); add(d_cart, CART); add(d_pal, PAL)
-
     rows=[]
     for b in sorted(brands):
         e=float(d_each.get(b,0.0)); p=float(d_pack.get(b,0.0)); c1=float(d_cart.get(b,0.0)); pal=float(d_pal.get(b,0.0))
@@ -411,7 +397,6 @@ def generate_activity_outbound_rep(dfs, cust, d_start, d_end):
         uk = str(k).upper()
         if ("REPALL" in uk) or ("REPALLET" in uk) or (uk.strip() == "REPALLETIZATION"):
             repR = float(nz(v, 0.0)); break
-
     cols = ws.columns
     def pick(header_text, default_i=None):
         for c in cols:
@@ -422,7 +407,6 @@ def generate_activity_outbound_rep(dfs, cust, d_start, d_end):
     CDATE = pick("Confirmation Date", 2)
     BRAND = pick("Brand Description", 3)
     SRC_HU = pick("Source Handling Unit", 24 if len(cols) >= 24 else len(cols))
-
     brand_sets = {}
     brands=set()
     for i, r in ws.iterrows():
@@ -437,7 +421,6 @@ def generate_activity_outbound_rep(dfs, cust, d_start, d_end):
         hu = str(nz(r.get(SRC_HU, ""))).strip() or f"ROW{i+2}"
         brands.add(b)
         brand_sets.setdefault(b, set()).add(hu)
-
     rows=[]
     for b in sorted(brands):
         cnt = len(brand_sets.get(b, set()))
@@ -468,7 +451,6 @@ def generate_activity_outbound_shrink_pal(dfs, cust, d_start, d_end):
         uk = str(k).upper()
         if uk == "SHRINK WRAP/PALLET OUT" or ("SHRINK" in uk and "PALLET" in uk and "OUT" in uk):
             rate = float(nz(v, 0.0)); break
-
     cols = ws.columns
     def pick(header):
         for c in cols:
@@ -479,7 +461,6 @@ def generate_activity_outbound_shrink_pal(dfs, cust, d_start, d_end):
     BRAND = pick("Brand Description")
     CNT_SHR = pick("Count - Shrink Wrap")
     CNT_PAL = pick("Count - Pallet Outbound")
-
     brands=set(); count_map={}
     for i, r in ws.iterrows():
         own = str(nz(r.get(OWNER, ""))).upper().strip()
@@ -492,7 +473,6 @@ def generate_activity_outbound_shrink_pal(dfs, cust, d_start, d_end):
         vpal = int(pd.to_numeric(nz(r.get(CNT_PAL, 0)), errors="coerce") or 0)
         brands.add(b)
         count_map[b] = count_map.get(b, 0) + vshr + vpal
-
     rows=[]
     for b in sorted(brands):
         cnt = int(count_map.get(b, 0))
@@ -518,7 +498,6 @@ def generate_activity_return(dfs, cust, d_start, d_end):
     if ws.empty:
         dbg("RET_NO_SOURCE")
         return pd.DataFrame(columns=cols_out)
-
     cols = ws.columns
     def pick(header):
         for c in cols:
@@ -529,7 +508,6 @@ def generate_activity_return(dfs, cust, d_start, d_end):
     BRAND = pick("Brand Description")
     QTY = pick("Act Dest Qty Alt UoM") or cols[-2]
     UOM = pick("Alt. Unit of Measure") or cols[-1]
-
     rmap = build_rate_map(rc, cust, "RETURN HANDLING")
     eachR = packR = carR = palR = 0.0
     for k, v in rmap.items():
@@ -542,7 +520,6 @@ def generate_activity_return(dfs, cust, d_start, d_end):
             carR = float(nz(v, 0.0))
         elif uk == "PALLET":
             palR = float(nz(v, 0.0))
-
     d_each={}; d_pack={}; d_car={}; d_pal={}; brands=set()
     for i, r in ws.iterrows():
         own = str(nz(r.get(OWNER, ""))).upper().strip()
@@ -562,7 +539,6 @@ def generate_activity_return(dfs, cust, d_start, d_end):
             d_car[b] = d_car.get(b, 0.0) + q
         elif u == "PAL":
             d_pal[b] = d_pal.get(b, 0.0) + q
-
     rows=[]
     for b in sorted(brands):
         qE=d_each.get(b,0.0); qP=d_pack.get(b,0.0); qC=d_car.get(b,0.0); qL=d_pal.get(b,0.0)
@@ -594,7 +570,6 @@ def generate_activity_scrap(dfs, cust, d_start, d_end):
     if ws.empty:
         dbg("SCRAP_NO_SOURCE")
         return pd.DataFrame(columns=cols_out)
-
     cols = ws.columns
     def pick(header):
         for c in cols:
@@ -606,7 +581,6 @@ def generate_activity_scrap(dfs, cust, d_start, d_end):
     REASON = pick("Movement Reason")
     WT = pick("Loading Weight")
     UOM = pick("Weight Unit")
-
     rmap = build_rate_map(rc, cust, "SCRAP HANDLING")
     normalR = 0.0; muniR = 0.0
     for k, v in rmap.items():
@@ -615,7 +589,6 @@ def generate_activity_scrap(dfs, cust, d_start, d_end):
             normalR = float(nz(v, 0.0))
         elif uk in ("MUNICIPALITY","MUNICIPAL"):
             muniR = float(nz(v, 0.0))
-
     d_norm={}; d_muni={}; brands=set()
     for i, r in ws.iterrows():
         own = str(nz(r.get(OWNER, ""))).upper().strip()
@@ -638,7 +611,6 @@ def generate_activity_scrap(dfs, cust, d_start, d_end):
             d_norm[b] = d_norm.get(b, 0.0) + wTon
         elif rsn == "SCMU":
             d_muni[b] = d_muni.get(b, 0.0) + wTon
-
     rows=[]
     for b in sorted(brands):
         qN=d_norm.get(b,0.0); qM=d_muni.get(b,0.0)
@@ -729,7 +701,6 @@ def generate_charge_summary(dfs: Dict[str, pd.DataFrame], cust: str, storage_df:
     amtStorage = sum(float(nz(gtS.get(x, 0.0)) or 0.0) for x in ["Charge_Ambient","Charge_Dry","Charge_Chiller","Charge_Freezer"])
     gtA = activity_df.iloc[-1] if not activity_df.empty else pd.Series()
     val = lambda col: float(nz(gtA.get(col, 0.0)) or 0.0)
-
     lines=[]
     def add(svc, ctype, amt):
         lines.append({"Service Type": svc, "Charge Type": ctype, "Charges": round(amt, 2) if round(amt, 2) > 0 else " - "})
@@ -751,14 +722,25 @@ def generate_charge_summary(dfs: Dict[str, pd.DataFrame], cust: str, storage_df:
     add("Scrap Handling", "Scrap Normal", val("Charge_ScrapNormal"))
     add("Scrap Handling", "Scrap Municipality", val("Charge_ScrapMunicipality"))
     add("Labelling (VAS)", "Re-Labelling / Promo Packing", 0.0)
-
     df = pd.DataFrame(lines)
     total = round(sum([x for x in df["Charges"] if isinstance(x, (int, float, np.floating))]), 2)
     df = pd.concat([df, pd.DataFrame([{"Service Type":"", "Charge Type":"Total Charges", "Charges": total}])], ignore_index=True)
     dbg("CHARGE_DONE", lines=len(df))
     return df
 
-# ---- Helpers for CLI/Jupyter selection
+def run_engine(wb_path: str, cust: str, d_start: dt.date, d_end: dt.date) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    dfs = read_workbook(wb_path)
+    storage_df = generate_storage_summary(dfs, cust, d_start, d_end)
+    inbound_df, diag_df = generate_activity_inbound(dfs, cust, d_start, d_end)
+    outbound_df = generate_activity_outbound(dfs, cust, d_start, d_end)
+    outbound_rep_df = generate_activity_outbound_rep(dfs, cust, d_start, d_end)
+    outbound_shr_df = generate_activity_outbound_shrink_pal(dfs, cust, d_start, d_end)
+    return_df = generate_activity_return(dfs, cust, d_start, d_end)
+    scrap_df = generate_activity_scrap(dfs, cust, d_start, d_end)
+    activity_df = assemble_activity_summary(inbound_df, outbound_df, outbound_rep_df, outbound_shr_df, return_df, scrap_df)
+    charge_df = generate_charge_summary(dfs, cust, storage_df, activity_df)
+    return storage_df, activity_df, charge_df, diag_df
+
 def looks_like_excel_path(p: str) -> bool:
     if not isinstance(p, str):
         return False
@@ -786,7 +768,6 @@ def pick_customer_from_master(wb_path: str) -> Optional[str]:
         if df.empty:
             print("Note: 'Customer Master' is empty; enter customer code manually.")
             return None
-        # Assume first column contains the customer code as in VBA rate filters
         codes = df.iloc[:,0].astype(str).str.strip().replace("", np.nan).dropna().unique().tolist()
         codes = [c for c in codes if c and c.lower() != "customer"]
         codes_sorted = sorted(set(codes))
@@ -800,13 +781,55 @@ def pick_customer_from_master(wb_path: str) -> Optional[str]:
             n = int(choice)
             if 1 <= n <= len(codes_sorted[:200]):
                 return str(codes_sorted[n-1]).upper()
-        # fallback to manual code
         if choice:
             return choice.upper()
         return None
     except Exception as e:
         print(f"Customer picker error: {e}")
         return None
+
+def get_billing_frequency(wb_path: str, cust_code: str) -> int:
+    try:
+        xls = pd.ExcelFile(wb_path)
+        if "Customer Master" not in xls.sheet_names:
+            print("Note: 'Customer Master' sheet not found; using default billing frequency of 30 days.")
+            return 30
+        df = xls.parse("Customer Master", dtype=object, keep_default_na=False)
+        if df.empty:
+            print("Note: 'Customer Master' is empty; using default billing frequency of 30 days.")
+            return 30
+        
+        # Find the "Billing Frequency(In Days)" column (case-insensitive)
+        cols = df.columns.str.lower()
+        freq_col = None
+        for col in cols:
+            if "billing frequency" in col and "days" in col:
+                freq_col = df.columns[cols.get_loc(col)]
+                break
+        if freq_col is None:
+            print("Note: 'Billing Frequency(In Days)' column not found; using default billing frequency of 30 days.")
+            return 30
+        
+        # Match customer code (case-insensitive)
+        df["_CUST"] = df.iloc[:, 0].astype(str).str.upper().str.strip()
+        cust_row = df[df["_CUST"] == cust_code.upper().strip()]
+        if cust_row.empty:
+            print(f"Note: Customer {cust_code} not found in 'Customer Master'; using default billing frequency of 30 days.")
+            return 30
+        
+        # Get billing frequency
+        freq = cust_row[freq_col].iloc[0]
+        freq_val = pd.to_numeric(freq, errors="coerce")
+        if pd.isna(freq_val) or freq_val <= 0:
+            print(f"Note: Invalid or missing billing frequency for {cust_code}; using default of 30 days.")
+            return 30
+        
+        freq_val = int(freq_val)
+        print(f"Billing frequency for {cust_code}: {freq_val} days")
+        return freq_val
+    except Exception as e:
+        print(f"Error retrieving billing frequency: {e}; using default billing frequency of 30 days.")
+        return 30
 
 def prompt_start_date(default_val: str) -> dt.date:
     s = input(f"Enter Start Date (dd/mm/yyyy or yyyy-mm-dd) [{default_val}]: ").strip()
@@ -824,22 +847,15 @@ def prompt_start_date(default_val: str) -> dt.date:
             return dt.date(int(y), int(m), int(d))
         return dt.datetime.strptime(default_val, "%Y-%m-%d").date()
 
-# =========================
-# Main
-# =========================
 if __name__ == "__main__":
     try:
-        default_path = "/content/drive/MyDrive/new_data_shop/demo_data_billingsystem_latest_1.xlsx"
-        wb_path = os.environ.get("BILLING_XLSX", default_path)
-        arg1 = safe_argv(1, wb_path)
-        if looks_like_excel_path(arg1) and os.path.exists(arg1):
-            wb_path = arg1
-        else:
-            wb_path = default_path
-
-        # Interactive selection
+        # Use absolute path from user input
+        wb_path = r"C:\Users\User\Downloads\reactapp\backend\demo_data_billingsystem_latest_1 (2).xlsx"
+        if not os.path.exists(wb_path):
+            print(f"Error: Excel file not found at {wb_path}. Please check the path and try again.")
+            sys.exit(1)
+        
         print(f"\nWorkbook: {wb_path}")
-        # Customer selection
         env_cust = os.environ.get("BILLING_CUST", "").strip().upper()
         cust_code = env_cust if env_cust else None
         if not cust_code:
@@ -847,31 +863,44 @@ if __name__ == "__main__":
             if picked:
                 cust_code = picked
         if not cust_code:
-            cust_code = input("Enter Customer Code: ").strip().upper() or "2005070"
-
-        # Start date selection
+            cust_code = input("Enter Customer Code: ").strip().upper() or "C2201"
+        
         env_start = os.environ.get("BILLING_START", "").strip()
-        default_start = env_start if env_start else dt.date.today().strftime("%Y-%m-01")
+        default_start = env_start if env_start else "2025-07-01"
         start_date = prompt_start_date(default_start)
-        end_date = (pd.to_datetime(start_date) + pd.offsets.MonthEnd(0)).date()
-
-        dbg("MAIN_INPUTS", file=wb_path, cust=cust_code, start=start_date, end=end_date)
-        if not os.path.exists(wb_path):
-            print(f"Error: Excel file not found at {wb_path}. Ensure the path is mounted and correct.")
-        else:
-            storage_df, activity_df, charge_df, diag_df = run_engine(wb_path, cust_code, start_date, end_date)
-
-            print("\n=== Storage Summary ===")
-            print(storage_df.to_string(index=False))
-
-            print("\n=== Activity Summary ===")
-            print(activity_df.to_string(index=False))
-
-            print("\n=== Charge Summary ===")
-            print(charge_df.to_string(index=False))
-
-            print("\n=== Diagnostics (Inbound) ===")
-            print(diag_df.to_string(index=False))
-
+        
+        # Get billing frequency and calculate end_date
+        billing_freq = get_billing_frequency(wb_path, cust_code)
+        end_date = start_date + dt.timedelta(days=billing_freq - 1)  # Subtract 1 to include start_date in period
+        
+        dbg("MAIN_INPUTS", file=wb_path, cust=cust_code, start=start_date, end=end_date, billing_freq=billing_freq)
+        
+        storage_df, activity_df, charge_df, diag_df = run_engine(wb_path, cust_code, start_date, end_date)
+        
+        # Print summaries to console
+        print("\n=== Storage Summary ===")
+        print(storage_df.to_string(index=False))
+        print("\n=== Activity Summary ===")
+        print(activity_df.to_string(index=False))
+        print("\n=== Charge Summary ===")
+        print(charge_df.to_string(index=False))
+        print("\n=== Diagnostics (Inbound) ===")
+        print(diag_df.to_string(index=False))
+        
+        # Save summaries to Excel
+        output_dir = os.path.dirname(wb_path)
+        output_path = os.path.join(output_dir, f"billing_summary_output_{cust_code}_{start_date.strftime('%Y%m%d')}.xlsx")
+        
+        try:
+            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                storage_df.to_excel(writer, sheet_name="Storage Summary", index=False)
+                activity_df.to_excel(writer, sheet_name="Activity Summary", index=False)
+                charge_df.to_excel(writer, sheet_name="Charge Summary", index=False)
+                diag_df.to_excel(writer, sheet_name="Diagnostics", index=False)
+            print(f"\nResults saved to: {output_path}")
+        except Exception as e:
+            print(f"Error saving Excel file: {e}")
+        
     except Exception as e:
         print(f"Runtime Error: {e}")
+        sys.exit(1)
